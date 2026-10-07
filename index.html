@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Number Scanner</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tesseract OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- SheetJS: creates real .xlsx Excel files locally -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen p-4 text-slate-800">
+  <div class="max-w-md mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4">
+    
+    <header class="border-b pb-2">
+      <h1 class="text-xl font-bold text-slate-900">File Tracker</h1>
+      <p class="text-xs text-slate-500">Saves locally on device • Exports real .XLSX</p>
+    </header>
+
+    <!-- Scan Button -->
+    <div>
+      <label class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl cursor-pointer shadow active:scale-[0.98] transition">
+        <span>📸 Take Photo with Camera</span>
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
+      </label>
+      <p id="ocrStatus" class="text-xs text-center text-slate-500 mt-2 min-h-[1.2rem]"></p>
+    </div>
+
+    <!-- Verification / Correction Box -->
+    <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl space-y-2">
+      <div class="flex justify-between items-center">
+        <label for="scannedText" class="text-xs font-bold uppercase tracking-wider text-amber-800">
+          Verify & Edit Number:
+        </label>
+        <span class="text-[10px] text-amber-600">Edit below if OCR made a mistake</span>
+      </div>
+      <input 
+        type="text" 
+        id="scannedText" 
+        placeholder="Waiting for scan or manual entry..."
+        class="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-lg font-mono font-bold focus:ring-2 focus:ring-amber-500 focus:outline-none"
+      >
+      <button 
+        id="saveBtn" 
+        class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 rounded-lg shadow-sm active:scale-[0.98] transition"
+      >
+        ✓ Confirm & Add to List
+      </button>
+    </div>
+
+    <!-- Records List & Export -->
+    <div class="pt-2">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-sm font-semibold text-slate-700">
+          Saved Files (<span id="recordCount">0</span>)
+        </h2>
+        <div class="space-x-2">
+          <button id="clearBtn" class="text-xs text-rose-500 hover:underline">Clear All</button>
+          <button id="exportBtn" class="text-xs font-bold bg-slate-900 text-white px-2.5 py-1 rounded hover:bg-slate-700">
+            ⬇ Export .XLSX
+          </button>
+        </div>
+      </div>
+
+      <ul id="recordsList" class="divide-y divide-slate-100 border border-slate-200 rounded-xl max-h-56 overflow-y-auto bg-slate-50 text-sm">
+        <!-- Records injected here -->
+      </ul>
+    </div>
+
+  </div>
+
+  <script>
+    // Load existing records from phone's local storage so data isn't lost on refresh
+    let records = JSON.parse(localStorage.getItem('file_records') || '[]');
+
+    const cameraInput = document.getElementById('cameraInput');
+    const scannedText = document.getElementById('scannedText');
+    const ocrStatus = document.getElementById('ocrStatus');
+    const saveBtn = document.getElementById('saveBtn');
+    const recordsList = document.getElementById('recordsList');
+    const recordCount = document.getElementById('recordCount');
+    const exportBtn = document.getElementById('exportBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    renderRecords();
+
+    // 1. Camera capture & OCR processing
+    cameraInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      ocrStatus.textContent = 'Analyzing sketch pen handwriting...';
+      scannedText.value = '';
+
+      try {
+        const worker = await Tesseract.createWorker('eng');
+        
+        // Optional: restrict character set if your files are purely alphanumeric
+        await worker.setParameters({
+          tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/-'
+        });
+
+        const ret = await worker.recognize(file);
+        await worker.terminate();
+
+        const detected = ret.data.text.trim();
+        scannedText.value = detected;
+        ocrStatus.textContent = 'Please check the box and correct any typos.';
+        scannedText.focus();
+      } catch (err) {
+        ocrStatus.textContent = 'Failed to read image. You can type it manually.';
+        console.error(err);
+      } finally {
+        cameraInput.value = '';
+      }
+    });
+
+    // 2. Save verified entry
+    saveBtn.addEventListener('click', () => {
+      const val = scannedText.value.trim();
+      if (!val) return;
+
+      records.unshift({
+        'File Number': val,
+        'Date': new Date().toLocaleDateString(),
+        'Time': new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+
+      localStorage.setItem('file_records', JSON.stringify(records));
+      scannedText.value = '';
+      ocrStatus.textContent = 'Saved to device storage!';
+      renderRecords();
+    });
+
+    // 3. Render list & delete action
+    function renderRecords() {
+      recordCount.textContent = records.length;
+      if (records.length === 0) {
+        recordsList.innerHTML = '<li class="p-3 text-slate-400 text-center text-xs">No files saved yet.</li>';
+        return;
+      }
+
+      recordsList.innerHTML = records.map((r, i) => `
+        <li class="p-2.5 flex justify-between items-center bg-white">
+          <div>
+            <span class="font-mono font-bold text-slate-800">${r['File Number']}</span>
+            <span class="block text-[10px] text-slate-400">${r['Date']} ${r['Time']}</span>
+          </div>
+          <button onclick="deleteRecord(${i})" class="text-slate-400 hover:text-rose-500 text-xs px-2">✕</button>
+        </li>
+      `).join('');
+    }
+
+    window.deleteRecord = (index) => {
+      records.splice(index, 1);
+      localStorage.setItem('file_records', JSON.stringify(records));
+      renderRecords();
+    };
+
+    clearBtn.addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear all recorded entries?')) {
+        records = [];
+        localStorage.removeItem('file_records');
+        renderRecords();
+      }
+    });
+
+    // 4. Download directly as real Excel (.xlsx) file
+    exportBtn.addEventListener('click', () => {
+      if (records.length === 0) {
+        alert('Scan and save at least one file first.');
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(records);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Files');
+
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `File_Records_${today}.xlsx`);
+    });
+  </script>
+</body>
+</html>
